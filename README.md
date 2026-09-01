@@ -173,14 +173,6 @@ curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip | u
 sudo mv ngrok /usr/local/bin/
 ```
 
-#### Authenticate ngrok
-
-Sign up for a free [ngrok account](https://dashboard.ngrok.com/login), then configure your auth token:
-
-```bash
-ngrok config add-authtoken <your-ngrok-auth-token>
-```
-
 #### Start ngrok Tunnel
 
 In a new terminal, expose your local FastAPI server to the public internet:
@@ -204,62 +196,15 @@ Forwarding                     https://abc123xyz.ngrok.io -> http://localhost:80
 
 **Copy the `Forwarding` URL** — this is your public webhook URL.
 
-#### Keeping ngrok Running
+#### Keep ngrok Running
 
-ngrok forwards traffic only while running. To keep it persistent:
+ngrok only forwards traffic while it's running. Open a new terminal and keep it active in the background:
 
-**Option 1: Run in Background (Windows)**
-```powershell
-# Start in a separate terminal and minimize
+```bash
 ngrok http 8000
 ```
 
-**Option 2: Run as Scheduled Task (Windows)**
-```powershell
-# Create a task that restarts ngrok if it crashes
-$action = New-ScheduledTaskAction -Execute "ngrok" -Argument "http 8000"
-$trigger = New-ScheduledTaskTrigger -AtStartup
-Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "ngrok-bot-tunnel"
-```
-
-**Option 3: Use ngrok Configuration File (Recommended)**
-
-Create `~/.ngrok2/ngrok.yml`:
-```yaml
-version: "3"
-authtoken: <your-ngrok-auth-token>
-
-tunnels:
-  giktekbot:
-    proto: http
-    addr: 8000
-    bind_tls: true
-```
-
-Then start with:
-```bash
-ngrok start giktekbot
-```
-
-**Option 4: Docker (Production-Ready)**
-
-Add to `docker-compose.yml`:
-```yaml
-ngrok:
-  image: ngrok/ngrok:latest
-  command: http host.docker.internal:8000
-  environment:
-    NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
-  ports:
-    - "4040:4040"  # ngrok web dashboard
-  networks:
-    - giktekbot-network
-```
-
-Then start with:
-```bash
-docker-compose up -d ngrok
-```
+The tunnel will remain active as long as this terminal stays open. For persistent long-term deployment, consider using a cloud platform or ngrok Pro (which provides static URLs and higher limits).
 
 ---
 
@@ -398,7 +343,7 @@ llm = ChatOpenAI(
 | **"Failed to connect" in ngrok logs** | Make sure `uvicorn main:app --host 0.0.0.0 --port 8000` is running. Test locally first: `curl http://localhost:8000/health`. |
 | **Zoho Cliq webhook keeps timing out** | Ensure async background processing is enabled in `main.py`. FastAPI should return HTTP 200 immediately, not wait for LLM response. |
 | **ngrok session quota exceeded** | You've hit the free tier limit (1 GB/month or 20 connections/min). Upgrade to ngrok Pro or wait for quota reset. |
-| **"Invalid authtoken" error** | Run `ngrok config add-authtoken <your-token>` from [ngrok dashboard](https://dashboard.ngrok.com/auth). |
+| **"connection refused" locally** | Make sure FastAPI is running with `uvicorn main:app --host 0.0.0.0 --port 8000 --reload` first. |
 | **HTTP 403 from Zoho Cliq** | Verify the ngrok URL in your Zoho Cliq bot handler matches the active tunnel. Check `ngrok logs` for rejected requests. |
 
 ---
