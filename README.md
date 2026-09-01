@@ -144,11 +144,178 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-### Step 5: Configure Zoho Cliq Integration
+### Step 5: Expose Local Server with ngrok (For Public Access)
+
+**ngrok** creates a secure public URL that tunnels to your local FastAPI server, allowing Zoho Cliq to access your webhook during development.
+
+#### Install ngrok
+
+Download and install ngrok from [ngrok.com](https://ngrok.com/download):
+
+**Windows:**
+```powershell
+# Using Chocolatey
+choco install ngrok
+
+# Or download manually and add to PATH
+# https://ngrok.com/download
+```
+
+**macOS:**
+```bash
+brew install ngrok/ngrok/ngrok
+```
+
+**Linux:**
+```bash
+# Download and extract
+curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip | unzip -
+sudo mv ngrok /usr/local/bin/
+```
+
+#### Authenticate ngrok
+
+Sign up for a free [ngrok account](https://dashboard.ngrok.com/login), then configure your auth token:
+
+```bash
+ngrok config add-authtoken <your-ngrok-auth-token>
+```
+
+#### Start ngrok Tunnel
+
+In a new terminal, expose your local FastAPI server to the public internet:
+
+```bash
+ngrok http 8000
+```
+
+Expected output:
+```
+ngrok                                                              (Ctrl+C to quit)
+
+Session Status                online
+Account                       your-account@example.com
+Version                       3.x.x
+Region                        us-central (US)
+Latency                        0 ms
+Web Interface                  http://127.0.0.1:4040
+Forwarding                     https://abc123xyz.ngrok.io -> http://localhost:8000
+```
+
+**Copy the `Forwarding` URL** — this is your public webhook URL.
+
+#### Keeping ngrok Running
+
+ngrok forwards traffic only while running. To keep it persistent:
+
+**Option 1: Run in Background (Windows)**
+```powershell
+# Start in a separate terminal and minimize
+ngrok http 8000
+```
+
+**Option 2: Run as Scheduled Task (Windows)**
+```powershell
+# Create a task that restarts ngrok if it crashes
+$action = New-ScheduledTaskAction -Execute "ngrok" -Argument "http 8000"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+Register-ScheduledTask -Action $action -Trigger $trigger -TaskName "ngrok-bot-tunnel"
+```
+
+**Option 3: Use ngrok Configuration File (Recommended)**
+
+Create `~/.ngrok2/ngrok.yml`:
+```yaml
+version: "3"
+authtoken: <your-ngrok-auth-token>
+
+tunnels:
+  giktekbot:
+    proto: http
+    addr: 8000
+    bind_tls: true
+```
+
+Then start with:
+```bash
+ngrok start giktekbot
+```
+
+**Option 4: Docker (Production-Ready)**
+
+Add to `docker-compose.yml`:
+```yaml
+ngrok:
+  image: ngrok/ngrok:latest
+  command: http host.docker.internal:8000
+  environment:
+    NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+  ports:
+    - "4040:4040"  # ngrok web dashboard
+  networks:
+    - giktekbot-network
+```
+
+Then start with:
+```bash
+docker-compose up -d ngrok
+```
+
+---
+
+### Step 6: Configure Zoho Cliq Integration
 
 1. In **Zoho Cliq**, navigate to **Bots** -> Create a new Bot (e.g., `GiktekAssistant`).
 2. Obtain your **Incoming Bot API Webhook URL** / `zapikey`.
-3. Configure your Bot Handler in Deluge to forward incoming chat messages via `postUrl` (with `isSync = false`) to your FastAPI backend endpoint (`http://<YOUR_HOST>:8000/chat`).
+3. Configure your Bot Handler in Deluge to forward incoming chat messages via `postUrl` (with `isSync = false`) to your FastAPI backend endpoint using the **ngrok public URL**:
+   ```
+   https://abc123xyz.ngrok.io/chat
+   ```
+   Replace `abc123xyz.ngrok.io` with your actual ngrok URL from Step 5.
+
+#### Example Deluge Configuration
+
+```javascript
+// In Zoho Cliq Bot Handler
+map<string, string> headers = new map<string, string>();
+headers.put("Content-Type", "application/json");
+
+map<string, string> payload = new map<string, string>();
+payload.put("query", queryText);
+payload.put("user_id", userEmail);
+payload.put("user_email", userEmail);
+
+// Use ngrok URL here
+response = invokeurl(
+    [
+        URL: "https://abc123xyz.ngrok.io/chat",
+        TYPE: POST,
+        PARAMETERS: payload,
+        HEADERS: headers,
+        CONNECTION: "zoho_cliq_connection"
+    ]
+);
+```
+
+#### Webhook Verification
+
+Test your webhook with curl:
+
+```bash
+# Test with ngrok URL
+curl -X POST https://abc123xyz.ngrok.io/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is our deployment process?", "user_id": "user@company.com", "user_email": "user@company.com"}'
+```
+
+#### ngrok Free Tier Limitations
+
+- **Session duration:** 2 hours (auto-restarts with new URL)
+- **Bandwidth:** 1 GB/month
+- **Connections:** 20/min
+- **Dynamic URL:** URL changes on restart (paid plans have static URLs)
+
+**For production, use ngrok Pro** (static URLs, higher limits, custom domains) or deploy to a cloud platform.
 
 ---
 
@@ -216,9 +383,23 @@ llm = ChatOpenAI(
 
 ## ❓ Troubleshooting & Edge Cases
 
+### Local Development Issues
+
 * **Empty Scraped Content (`Content Length: 0`):** Ensure `PlaywrightURLLoader` includes `wait_until="networkidle"`. Single Page Applications (SPAs) require time for JavaScript rendering to complete.
 * **Playwright Async Loop Error:** In `.py` scripts, wrap Playwright calls inside an `async def main()` coroutine executed with `asyncio.run(main())`.
 * **Low Retrieval Matching:** Set `score_threshold` between `0.3` and `0.4` for `nomic-embed-text` embeddings, and ensure the LLM prompt explicitly handles technical domain synonyms.
+
+### ngrok Issues
+
+| Issue | Solution |
+|-------|----------|
+| **"Connection refused" from Zoho Cliq** | Ensure FastAPI is running on port 8000 and ngrok tunnel is active. Check `http://localhost:4040` (ngrok dashboard). |
+| **ngrok URL expired/changed** | Free tier URLs expire after 2 hours. Save the URL somewhere or upgrade to ngrok Pro for persistent URLs. Restart ngrok if needed. |
+| **"Failed to connect" in ngrok logs** | Make sure `uvicorn main:app --host 0.0.0.0 --port 8000` is running. Test locally first: `curl http://localhost:8000/health`. |
+| **Zoho Cliq webhook keeps timing out** | Ensure async background processing is enabled in `main.py`. FastAPI should return HTTP 200 immediately, not wait for LLM response. |
+| **ngrok session quota exceeded** | You've hit the free tier limit (1 GB/month or 20 connections/min). Upgrade to ngrok Pro or wait for quota reset. |
+| **"Invalid authtoken" error** | Run `ngrok config add-authtoken <your-token>` from [ngrok dashboard](https://dashboard.ngrok.com/auth). |
+| **HTTP 403 from Zoho Cliq** | Verify the ngrok URL in your Zoho Cliq bot handler matches the active tunnel. Check `ngrok logs` for rejected requests. |
 
 ---
 
